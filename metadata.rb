@@ -8,3 +8,4 @@ version          '0.1.0'
 
 depends 'base', '~> 0.1.0'
 depends 'nginx', '~> 2.7.4'
+depends 'unicorn', '~> 2.0.0'
