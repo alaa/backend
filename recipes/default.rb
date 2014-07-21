@@ -12,8 +12,6 @@ include_recipe 'nginx::repo'
 include_recipe 'apt::default'
 include_recipe 'nginx::default'
 
-
-
 template '/usr/share/nginx/html/index.html' do
   source 'index.html.erb'
   group  'root'
