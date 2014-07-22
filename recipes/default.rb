@@ -13,6 +13,13 @@ include_recipe 'apt::default'
 include_recipe 'unicorn::default'
 include_recipe 'nginx::default'
 
+user node[:backend][:user] do
+  supports :manage_home => true
+  comment "Application deployer user"
+  home "/home/#{node[:backend][:user]}"
+  shell "/bin/bash"
+end
+
 unicorn_config "/etc/unicorn/#{node[:backend][:app]}.rb" do
   listen({ node[:unicorn][:port] => node[:unicorn][:options] })
   working_directory ::File.join(node[:backend][:deploy_to], 'current')
@@ -29,51 +36,20 @@ template "/etc/nginx/sites-available/#{node[:backend][:app]}" do
     :port       => node[:nginx][:port],
     :root       => node[:nginx][:root]
   })
-  notifies :run, "execute[nxensite]", :immediately
-  notifies :run, "execute[unicorn]", :immediately
-end
-
-directory "/usr/share/nginx/www/shared/config/" do
-  action :create
-  recursive true
-end
-
-directory "/usr/share/nginx/www/shared/log/" do
-  action :create
-  recursive true
-end
-
-template "/usr/share/nginx/www/shared/config/database.yml" do
-  source 'database.yml.erb'
-end
-
-execute "nxensite" do
-  path ['/usr/sbin']
-  cwd '/etc/nginx/sites-available/'
-  command "nxensite #{node[:backend][:app]}"
-end
-
-execute "unicorn" do
-  path ['/usr/sbin']
-  cwd '/usr/share/nginx/www/current/'
-  command "export rvmsudo_secure_path=1 && /bin/bash --login rvmsudo bundle exec unicorn -D -E #{node[:unicorn][:env]} -c /etc/unicorn/#{node[:backend][:app]}.rb"
-end
-
-user node[:backend][:user] do
-  supports :manage_home => true
-  comment "Application deployer user"
-  home "/home/#{node[:backend][:user]}"
-  shell "/bin/bash"
+  notifies :run, "execute[nxensite]"
 end
 
 directory node[:backend][:deploy_to] do
   action :create
   recursive true
+  owner node[:backend][:user]
+  group node[:backend][:user]
 end
 
 deploy_revision node[:backend][:deploy_to] do
   repo node[:backend][:repo]
   user node[:backend][:user]
+  keep_releases 3
 
   before_symlink do
     execute 'install dependencies' do
@@ -83,4 +59,45 @@ deploy_revision node[:backend][:deploy_to] do
     end
   end
   notifies :restart, "service[nginx]"
+  notifies :run, "execute[stop_unicorn]", :immediately
+  notifies :run, "execute[start_unicorn]"
+end
+
+directory "/usr/share/nginx/www/shared/config/" do
+  action :create
+  recursive true
+  owner node[:backend][:user]
+  group node[:backend][:user]
+end
+
+directory "/usr/share/nginx/www/shared/log/" do
+  action :create
+  recursive true
+  owner node[:backend][:user]
+  group node[:backend][:user]
+end
+
+template "/usr/share/nginx/www/shared/config/database.yml" do
+  source 'database.yml.erb'
+  owner node[:backend][:user]
+  group node[:backend][:user]
+end
+
+execute "nxensite" do
+  path ['/usr/sbin']
+  cwd '/etc/nginx/sites-available/'
+  command "nxensite #{node[:backend][:app]}"
+end
+
+execute 'stop_unicorn' do
+  path ['/usr/sbin']
+  command "ps aux | grep '[u]nicorn master' | awk '{ print $2 }' | xargs sudo kill -9"
+  only_if "ps ax | grep [u]nicorn"
+end
+
+execute "start_unicorn" do
+  path ['/usr/sbin']
+  cwd '/usr/share/nginx/www/current/'
+  command "export rvmsudo_secure_path=1 && /bin/bash --login rvmsudo bundle exec unicorn -D -E #{node[:unicorn][:env]} -c /etc/unicorn/#{node[:backend][:app]}.rb"
+  not_if "ps ax | grep [u]nicorn"
 end
